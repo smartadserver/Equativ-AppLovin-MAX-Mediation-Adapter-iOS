@@ -11,6 +11,17 @@
 #define SASErrorCodeNoAd           1
 #define SASErrorCodeLoadingTimeout 6
 
+@interface MAEquativNativeAd : MANativeAd
+
+@property (nonatomic) SASNativeAd *sasNativeAd;
+@property (nonatomic, nullable) SASNativeAdMediaView *sasNativeAdMediaView;
+@property (assign) id<MANativeAdAdapterDelegate> nativeAdAdapterDelegate;
+
+- (instancetype)initWithSASNativeAd:(SASNativeAd *)sasNativeAd
+            nativeAdAdapterDelegate:(id<MANativeAdAdapterDelegate>)nativeAdAdapterDelegate
+                       builderBlock:(NS_NOESCAPE MANativeAdBuilderBlock)builderBlock;
+@end
+
 @interface ALEquativMediationAdapter() <SASBannerViewDelegate, SASInterstitialManagerDelegate, SASRewardedVideoManagerDelegate>
 
 /// Banner related properties
@@ -24,6 +35,11 @@
 /// Rewarded related properties
 @property (nonatomic, nullable) SASRewardedVideoManager *rewardedVideoManager;
 @property (assign) id<MARewardedAdapterDelegate> maxRewardedAdapterDelegate;
+
+/// Native ad related properties
+@property (nonatomic, nullable) SASNativeAdManager *nativeAdManager;
+@property (nonatomic, nullable) SASNativeAd *nativeAd;
+@property (assign) id<MANativeAdAdapterDelegate> maxNativeAdAdapterDelegate;
 
 @end
 
@@ -87,7 +103,7 @@
 }
 
 - (NSString *)adapterVersion {
-    return @"1.0";
+    return @"1.1";
 }
 
 #pragma mark -- MAAdViewAdapter implementation
@@ -331,6 +347,145 @@
         MAReward *maxReward = [MAReward rewardWithAmount:reward.amount.integerValue label:reward.currency];
         [self.maxRewardedAdapterDelegate didRewardUserWithReward:maxReward];
     }
+}
+
+#pragma mark -- MANativeAd implementation
+
+- (void)loadNativeAdForParameters:(id<MAAdapterResponseParameters>)parameters andNotify:(id<MANativeAdAdapterDelegate>)delegate {
+    SASAdPlacement *adPlacement = [self placementWith:parameters.thirdPartyAdPlacementIdentifier];
+    
+    if (adPlacement == nil) {
+        [self log:@"The PlacementId found is not a valid Equativ placement. This placement should be formatted like: <site id>/<page id>/<format id>[/<targeting string> (optional)] (ex: 123/456/789/targetingString or 123/456/789). The invalid found PlacementId string: %@", parameters.thirdPartyAdPlacementIdentifier];
+        
+        if (delegate != nil && [delegate respondsToSelector:@selector(didFailToLoadNativeAdWithError:)]) {
+            [delegate didFailToLoadNativeAdWithError:[MAAdapterError errorWithCode:MAAdapterError.errorCodeInvalidConfiguration]];
+        }
+        
+        return;
+    }
+    
+    self.maxNativeAdAdapterDelegate = delegate;
+    
+    // Configure SASDisplayKit with siteID
+    [[SASConfiguration sharedInstance] configureWithSiteId:adPlacement.siteId];
+    
+    // Clean up if needed
+    if (self.nativeAd != nil) {
+        [self.nativeAd unregisterViews];
+        self.nativeAd = nil;
+    }
+    
+    self.nativeAdManager = nil;
+    
+    self.nativeAdManager = [[SASNativeAdManager alloc] initWithPlacement:adPlacement];
+    [self.nativeAdManager requestAd:^(SASNativeAd * _Nullable nativeAd, NSError * _Nullable error) {
+        if (nativeAd) {
+            self.nativeAd = nativeAd;
+            
+            SASNativeAdMediaView *mediaView = nil;
+            
+            if (nativeAd.hasMedia) {
+                mediaView = [[SASNativeAdMediaView alloc] initWithFrame:CGRectZero];
+                [mediaView registerNativeAd:nativeAd];
+                
+                mediaView.autoresizingMask = (UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight);
+                mediaView.translatesAutoresizingMaskIntoConstraints = YES;
+                
+            } else if (nativeAd.coverImage != nil) {
+                // MediaView has priority on cover image
+                NSURLSessionDataTask *dataTask = [[NSURLSession sharedSession] dataTaskWithURL:nativeAd.coverImage.URL
+                                                                             completionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
+                    dispatch_sync(dispatch_get_main_queue(), ^{
+                        UIImageView *coverImageView = nil;
+                        
+                        if (data != nil && error == nil) {
+                            coverImageView = [[UIImageView alloc] initWithImage:[[UIImage alloc] initWithData:data]];
+                            coverImageView.contentMode = UIViewContentModeScaleAspectFit;
+                        }
+                        
+                        // Create native only once cover image is downloaded
+                        MANativeAd *maxNativeAd = [self createMAEquativNativeAdWithSASNativeAd:nativeAd nativeAdAdapterDelegate:delegate mediaView:coverImageView];
+                        
+                        if (delegate != nil && [delegate respondsToSelector:@selector(didLoadAdForNativeAd:withExtraInfo:)]) {
+                            [delegate didLoadAdForNativeAd:maxNativeAd withExtraInfo:nil];
+                        }
+                    });
+                }];
+                
+                [dataTask resume];
+                
+                // Quit the method has the delegate will be called in the URLSession
+                return;
+            }
+            
+            MAEquativNativeAd *maxNativeAd = [self createMAEquativNativeAdWithSASNativeAd:nativeAd nativeAdAdapterDelegate:delegate mediaView:mediaView];
+            maxNativeAd.sasNativeAdMediaView = mediaView;
+            
+            if ([delegate respondsToSelector:@selector(didLoadAdForNativeAd:withExtraInfo:)]) {
+                [delegate didLoadAdForNativeAd:maxNativeAd withExtraInfo:nil];
+            }
+            
+        } else if (delegate != nil && [delegate respondsToSelector:@selector(didFailToLoadNativeAdWithError:)]) {
+            // Error management
+            if (error != nil && error.code == SASErrorCodeNoAd) {
+                [delegate didFailToLoadNativeAdWithError:[MAAdapterError errorWithCode:MAAdapterError.errorCodeNoFill]];
+            } else if (error != nil && error.code == SASErrorCodeLoadingTimeout) {
+                [delegate didFailToLoadNativeAdWithError:[MAAdapterError errorWithCode:MAAdapterError.errorCodeTimeout]];
+            } else {
+                [delegate didFailToLoadNativeAdWithError:[MAAdapterError errorWithCode:MAAdapterError.errorCodeUnspecified]];
+            }
+        }
+    }];
+}
+
+- (MAEquativNativeAd *)createMAEquativNativeAdWithSASNativeAd:(SASNativeAd *)sasNativeAd
+                                      nativeAdAdapterDelegate:(id<MANativeAdAdapterDelegate>)nativeAdAdapterDelegate
+                                                    mediaView:(nullable UIView *)mediaView {
+    
+    return [[MAEquativNativeAd alloc] initWithSASNativeAd:sasNativeAd
+                                  nativeAdAdapterDelegate:nativeAdAdapterDelegate
+                                             builderBlock:^(MANativeAdBuilder * _Nonnull builder) {
+        builder.title = sasNativeAd.title;
+        builder.body = sasNativeAd.body;
+        builder.starRating = [NSNumber numberWithFloat:sasNativeAd.rating];
+        builder.callToAction = sasNativeAd.callToAction;
+        
+        if (sasNativeAd.icon != nil) {
+            builder.icon = [[MANativeAdImage alloc] initWithURL:sasNativeAd.icon.URL];
+        }
+        
+        if (mediaView != nil) {
+            builder.mediaView = mediaView;
+        }
+    }];
+}
+
+@end
+
+@implementation MAEquativNativeAd
+
+- (instancetype)initWithSASNativeAd:(SASNativeAd *)sasNativeAd
+            nativeAdAdapterDelegate:(id<MANativeAdAdapterDelegate>)nativeAdAdapterDelegate
+                       builderBlock:(NS_NOESCAPE MANativeAdBuilderBlock)builderBlock {
+    if (self = [super initWithFormat:MAAdFormat.native builderBlock:builderBlock]) {
+        self.sasNativeAd = sasNativeAd;
+        self.nativeAdAdapterDelegate = nativeAdAdapterDelegate;
+        return self;
+    }
+    return nil;
+}
+
+- (BOOL)prepareForInteractionClickableViews:(NSArray<UIView *> *)clickableViews withContainer:(UIView *)container {
+    [self.sasNativeAd registerView:container tappableViews:clickableViews modalParentViewController:[ALUtils topViewControllerFromKeyWindow]];
+    
+    if (self.sasNativeAdMediaView != nil) {
+        [self.sasNativeAdMediaView registerNativeAd:self.sasNativeAd];
+    }
+    
+    if (self.nativeAdAdapterDelegate != nil && [self.nativeAdAdapterDelegate respondsToSelector:@selector(didDisplayNativeAdWithExtraInfo:)]) {
+        [self.nativeAdAdapterDelegate didDisplayNativeAdWithExtraInfo:nil];
+    }
+    return YES;
 }
 
 @end
