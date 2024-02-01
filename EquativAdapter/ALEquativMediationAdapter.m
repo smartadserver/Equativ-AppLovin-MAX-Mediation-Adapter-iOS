@@ -1,6 +1,5 @@
 //
 //  ALEquativMediationAdapter.m
-//  AppLovinSample
 //
 //  Created by Guillaume Laubier on 20/03/2023.
 //
@@ -11,11 +10,13 @@
 #define SASErrorCodeNoAd           1
 #define SASErrorCodeLoadingTimeout 6
 
+NS_ASSUME_NONNULL_BEGIN
+
 @interface MAEquativNativeAd : MANativeAd
 
 @property (nonatomic) SASNativeAd *sasNativeAd;
 @property (nonatomic, nullable) SASNativeAdMediaView *sasNativeAdMediaView;
-@property (assign) id<MANativeAdAdapterDelegate> nativeAdAdapterDelegate;
+@property (atomic, weak, nullable) id<MANativeAdAdapterDelegate> nativeAdAdapterDelegate;
 
 - (instancetype)initWithSASNativeAd:(SASNativeAd *)sasNativeAd
             nativeAdAdapterDelegate:(id<MANativeAdAdapterDelegate>)nativeAdAdapterDelegate
@@ -26,20 +27,20 @@
 
 /// Banner related properties
 @property (nonatomic, nullable) SASBannerView *bannerView;
-@property (assign) id<MAAdViewAdapterDelegate> maxAdViewAdapterDelegate;
+@property (atomic, weak, nullable) id<MAAdViewAdapterDelegate> maxAdViewAdapterDelegate;
 
 /// Interstitial related properties
 @property (nonatomic, nullable) SASInterstitialManager *interstitialManager;
-@property (assign) id<MAInterstitialAdapterDelegate> maxInterstitialAdapterDelegate;
+@property (atomic, weak, nullable) id<MAInterstitialAdapterDelegate> maxInterstitialAdapterDelegate;
 
 /// Rewarded related properties
 @property (nonatomic, nullable) SASRewardedVideoManager *rewardedVideoManager;
-@property (assign) id<MARewardedAdapterDelegate> maxRewardedAdapterDelegate;
+@property (atomic, weak, nullable) id<MARewardedAdapterDelegate> maxRewardedAdapterDelegate;
 
 /// Native ad related properties
 @property (nonatomic, nullable) SASNativeAdManager *nativeAdManager;
 @property (nonatomic, nullable) SASNativeAd *nativeAd;
-@property (assign) id<MANativeAdAdapterDelegate> maxNativeAdAdapterDelegate;
+@property (atomic, weak, nullable) id<MANativeAdAdapterDelegate> maxNativeAdAdapterDelegate;
 
 @end
 
@@ -103,7 +104,7 @@
 }
 
 - (NSString *)adapterVersion {
-    return @"1.1";
+    return @"1.2";
 }
 
 #pragma mark -- MAAdViewAdapter implementation
@@ -394,11 +395,11 @@
             } else if (nativeAd.coverImage != nil) {
                 // MediaView has priority on cover image
                 NSURLSessionDataTask *dataTask = [[NSURLSession sharedSession] dataTaskWithURL:nativeAd.coverImage.URL
-                                                                             completionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
+                                                                             completionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable dataTaskError) {
                     dispatch_sync(dispatch_get_main_queue(), ^{
                         UIImageView *coverImageView = nil;
                         
-                        if (data != nil && error == nil) {
+                        if (data != nil && dataTaskError == nil) {
                             coverImageView = [[UIImageView alloc] initWithImage:[[UIImage alloc] initWithData:data]];
                             coverImageView.contentMode = UIViewContentModeScaleAspectFit;
                         }
@@ -489,3 +490,5 @@
 }
 
 @end
+
+NS_ASSUME_NONNULL_END

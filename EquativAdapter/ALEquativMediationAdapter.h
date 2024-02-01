@@ -1,6 +1,5 @@
 //
 //  ALEquativMediationAdapter.h
-//  AppLovinSample
 //
 //  Created by Guillaume Laubier on 20/03/2023.
 //
