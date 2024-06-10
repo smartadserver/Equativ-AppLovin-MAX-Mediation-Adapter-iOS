@@ -5,7 +5,11 @@
 //
 
 #import "ALEquativMediationAdapter.h"
+#import <AppLovinSDK/AppLovinSDK.h>
 #import <SASDisplayKit/SASDisplayKit.h>
+
+#define SASImplementationInfo_PrimarySDKName            @"AppLovin"
+#define SASImplementationInfo_MediationAdapterVersion   @"1.4"
 
 #define SASErrorCodeNoAd           1
 #define SASErrorCodeLoadingTimeout 6
@@ -91,7 +95,7 @@ NS_ASSUME_NONNULL_BEGIN
 #pragma mark -- ALMediationAdapter implementation
 
 - (void)initializeWithParameters:(id<MAAdapterInitializationParameters>)parameters completionHandler:(void (^)(MAAdapterInitializationStatus, NSString * _Nullable))completionHandler {
-    [SASConfiguration sharedInstance].primarySDK = NO;
+    [SASConfiguration sharedInstance].secondaryImplementationInfo = [[SASSecondaryImplementationInfo alloc] initWithPrimarySDKName:SASImplementationInfo_PrimarySDKName primarySDKVersion:ALSdk.version mediationAdapterVersion:SASImplementationInfo_MediationAdapterVersion];
     completionHandler(MAAdapterInitializationStatusDoesNotApply, nil);
 }
 
@@ -104,7 +108,7 @@ NS_ASSUME_NONNULL_BEGIN
 }
 
 - (NSString *)adapterVersion {
-    return @"1.2";
+    return SASImplementationInfo_MediationAdapterVersion;
 }
 
 #pragma mark -- MAAdViewAdapter implementation
