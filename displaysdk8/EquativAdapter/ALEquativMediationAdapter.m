@@ -12,7 +12,20 @@
 #define SASErrorCodeNoAd           30103
 #define SASErrorCodeLoadingTimeout 20001
 
-@interface ALEquativMediationAdapter() <SASBannerViewDelegate, SASInterstitialManagerDelegate>
+@interface MAEquativNativeAd : MANativeAd
+
+@property (nonatomic) SASNativeAdAssets *nativeAdAssets;
+@property (nonatomic) SASNativeAdView *sasNativeAdView;
+@property (atomic, weak, nullable) id<MANativeAdAdapterDelegate> nativeAdAdapterDelegate;
+
+- (instancetype)initWithNativeAdAssets:(SASNativeAdAssets *)nativeAdAssets
+                          nativeAdView:(SASNativeAdView *)nativeAdView
+               nativeAdAdapterDelegate:(id<MANativeAdAdapterDelegate>)nativeAdAdapterDelegate
+                          builderBlock:(NS_NOESCAPE MANativeAdBuilderBlock)builderBlock;
+
+@end
+
+@interface ALEquativMediationAdapter() <SASBannerViewDelegate, SASInterstitialManagerDelegate, SASNativeAdViewDelegate>
 
 /// Banner related properties
 @property (nonatomic, nullable) SASBannerView *bannerView;
@@ -22,11 +35,16 @@
 @property (nonatomic, nullable) SASInterstitialManager *interstitialManager;
 @property (assign) id<MAInterstitialAdapterDelegate> maxInterstitialAdapterDelegate;
 
+/// Native ad related properties
+@property (atomic, nullable) SASNativeAdView *nativeAdView;
+@property (atomic, weak, nullable) id<MANativeAdAdapterDelegate> maxNativeAdAdapterDelegate;
+@property (atomic, strong, nullable) UIImage *nativeAdMainImage;
+
 @end
 
 @implementation ALEquativMediationAdapter
 
-#pragma mark -- Util method
+#pragma mark - Util method
 
 /**
  Convert the raw placement string to an SASAdPlacement model object.
@@ -68,7 +86,7 @@
     return [[SASAdPlacement alloc] initWithSiteId:siteID pageId:pageID formatId:formatID keywordTargeting:targeting];
 }
 
-#pragma mark -- ALMediationAdapter implementation
+#pragma mark - ALMediationAdapter implementation
 
 - (void)initializeWithParameters:(id<MAAdapterInitializationParameters>)parameters completionHandler:(void (^)(MAAdapterInitializationStatus, NSString * _Nullable))completionHandler {
     [SASConfiguration sharedInstance].secondaryImplementationInfo = [[SASSecondaryImplementationInfo alloc] initWithPrimarySDKName:SASImplementationInfo_PrimarySDKName primarySDKVersion:ALSdk.version mediationAdapterVersion:SASImplementationInfo_MediationAdapterVersion];
@@ -87,7 +105,7 @@
     return SASImplementationInfo_MediationAdapterVersion;
 }
 
-#pragma mark -- MAAdViewAdapter implementation
+#pragma mark - MAAdViewAdapter implementation
 
 - (void)loadAdViewAdForParameters:(nonnull id<MAAdapterResponseParameters>)parameters adFormat:(nonnull MAAdFormat *)adFormat andNotify:(nonnull id<MAAdViewAdapterDelegate>)delegate {
     SASAdPlacement *adPlacement = [self placementWith:parameters.thirdPartyAdPlacementIdentifier];
@@ -100,7 +118,7 @@
     
     self.maxAdViewAdapterDelegate = delegate;
     
-    // Configure SASDisplayKit with siteID
+    // Configure SASDisplayKit
     [[SASConfiguration sharedInstance] configure];
     
     if (self.bannerView == nil) {
@@ -143,7 +161,7 @@
     // Nothing to do
 }
 
-#pragma mark -- MAInterstitialAdapter implementation
+#pragma mark - MAInterstitialAdapter implementation
 
 - (void)loadInterstitialAdForParameters:(nonnull id<MAAdapterResponseParameters>)parameters andNotify:(nonnull id<MAInterstitialAdapterDelegate>)delegate {
     SASAdPlacement *adPlacement = [self placementWith:parameters.thirdPartyAdPlacementIdentifier];
@@ -158,7 +176,7 @@
     
     self.maxInterstitialAdapterDelegate = delegate;
     
-    // Configure SASDisplayKit with siteID
+    // Configure SASDisplayKit
     [[SASConfiguration sharedInstance] configure];
     
     // reset interstitial manager
@@ -222,6 +240,158 @@
     if (self.maxInterstitialAdapterDelegate != nil && [self.maxInterstitialAdapterDelegate respondsToSelector:@selector(didClickInterstitialAd)]) {
         [self.maxInterstitialAdapterDelegate didClickInterstitialAd];
     }
+}
+
+#pragma mark - MAInterstitialAdapter implementation
+
+- (void)loadNativeAdForParameters:(id<MAAdapterResponseParameters>)parameters andNotify:(id<MANativeAdAdapterDelegate>)delegate {
+    SASAdPlacement *adPlacement = [self placementWith:parameters.thirdPartyAdPlacementIdentifier];
+    
+    // Placement validation
+    if (adPlacement == nil) {
+        [self log:@"The PlacementId found is not a valid Equativ placement. This placement should be formatted like: <site id>/<page id>/<format id>[/<targeting string> (optional)] (ex: 123/456/789/targetingString or 123/456/789). The invalid found PlacementId string: %@", parameters.thirdPartyAdPlacementIdentifier];
+        
+        if (delegate != nil && [delegate respondsToSelector:@selector(didFailToLoadNativeAdWithError:)]) {
+            [delegate didFailToLoadNativeAdWithError:[MAAdapterError errorWithCode:MAAdapterError.errorCodeInvalidConfiguration]];
+        }
+        
+        return;
+    }
+    
+    // Saving the AppLovin delegate for later use…
+    self.maxNativeAdAdapterDelegate = delegate;
+    
+    // Switching to the main thread as this method is not guaranteed to be called on it!
+    __weak __typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        // Configure SASDisplayKit
+        [[SASConfiguration sharedInstance] configure];
+        
+        // Native ad view instance creation if needed
+        if (weakSelf.nativeAdView == nil) {
+            weakSelf.nativeAdView = [[SASNativeAdView alloc] initWithFrame:CGRectZero];
+            weakSelf.nativeAdView.delegate = self;
+        }
+        
+        // Native ad view loading
+        [weakSelf.nativeAdView loadAdWithAdPlacement:adPlacement];
+    });
+}
+
+- (void)nativeAdView:(SASNativeAdView *)nativeAdView didLoadWithInfo:(SASAdInfo *)adInfo nativeAdAssets:(SASNativeAdAssets *)nativeAdAssets {
+    // Attempting to download the main image if needed because AppLovin does not seems to handle it automatically contrary to the icon image…
+    __weak __typeof(self) weakSelf = self;
+    [self asynchonousImageDownloadWithURL:nativeAdAssets.mainView.url completionHandler:^(UIImage *image) {
+        // Saving the main image if any
+        weakSelf.nativeAdMainImage = image;
+        
+        // Creating an AppLovin native ad object from the Equativ assets
+        MANativeAd *nativeAd = [weakSelf createMAEquativNativeAdWithNativeAdAssets:nativeAdAssets
+                                                                      nativeAdView:nativeAdView
+                                                           nativeAdAdapterDelegate:weakSelf.maxNativeAdAdapterDelegate];
+        
+        // Returning the load success to AppLovin delegate
+        [weakSelf.maxNativeAdAdapterDelegate didLoadAdForNativeAd:nativeAd withExtraInfo:nil];
+    }];
+}
+
+- (void)asynchonousImageDownloadWithURL:(nullable NSURL *)imageURL completionHandler:(void(^)(UIImage * _Nullable ))completionHandler {
+    if (imageURL != nil) {
+        // Downloading the image if any
+        NSURLSessionTask *task = [[NSURLSession sharedSession] dataTaskWithURL:imageURL completionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (data != nil) {
+                    // Returning the image in case of success
+                    completionHandler([[UIImage alloc] initWithData:data]);
+                } else {
+                    // In case of failure, returning nil so it does not interrupt the loading process
+                    completionHandler(nil);
+                }
+            });
+        }];
+        [task resume];
+    } else {
+        //  If no image, returning immediately instead
+        completionHandler(nil);
+    }
+}
+
+- (void)nativeAdView:(SASNativeAdView *)nativeAdView didFailToLoadWithError:(NSError *)error {
+    // Choosing the relevant AppLovin error code depending on the Equativ error code
+    if (error.code == SASErrorCodeNoAd) {
+        [self.maxNativeAdAdapterDelegate didFailToLoadNativeAdWithError:[MAAdapterError errorWithCode:MAAdapterError.errorCodeNoFill]];
+    } else if (error.code == SASErrorCodeLoadingTimeout) {
+        [self.maxNativeAdAdapterDelegate didFailToLoadNativeAdWithError:[MAAdapterError errorWithCode:MAAdapterError.errorCodeTimeout]];
+    } else {
+        [self.maxNativeAdAdapterDelegate didFailToLoadNativeAdWithError:[MAAdapterError errorWithCode:MAAdapterError.errorCodeUnspecified]];
+    }
+}
+
+- (MAEquativNativeAd *)createMAEquativNativeAdWithNativeAdAssets:(SASNativeAdAssets *)nativeAdAssets
+                                                    nativeAdView:(SASNativeAdView *)nativeAdView
+                                         nativeAdAdapterDelegate:(id<MANativeAdAdapterDelegate>)nativeAdAdapterDelegate {
+    // Creating an AppLovin compatible native ad object from the Equativ assets
+    return [[MAEquativNativeAd alloc] initWithNativeAdAssets:nativeAdAssets
+                                                nativeAdView:nativeAdView
+                                     nativeAdAdapterDelegate:nativeAdAdapterDelegate builderBlock:^(MANativeAdBuilder *builder) {
+        // Binding all the common assets directly…
+        builder.title = nativeAdAssets.title;
+        builder.body = nativeAdAssets.body;
+        builder.advertiser = nativeAdAssets.advertiser;
+        builder.starRating = nativeAdAssets.rating;
+        builder.callToAction = nativeAdAssets.callToAction;
+        
+        // The icon image can be handled automatically be AppLovin if necessary
+        if (nativeAdAssets.iconImage.url != nil) {
+            builder.icon = [[MANativeAdImage alloc] initWithURL:nativeAdAssets.iconImage.url];
+        }
+        
+        // The main image must be handled manually:
+        // it should have already been downloaded if relevant so we simply wrap it into an Image View if it exists…
+        if (self.nativeAdMainImage != nil) {
+            UIImageView *mediaView = [[UIImageView alloc] initWithImage:self.nativeAdMainImage];
+            mediaView.contentMode = UIViewContentModeScaleAspectFit;
+            builder.mediaView = mediaView;
+        }
+    }];
+}
+
+@end
+
+@implementation MAEquativNativeAd
+
+- (instancetype)initWithNativeAdAssets:(SASNativeAdAssets *)nativeAdAssets
+                          nativeAdView:(SASNativeAdView *)nativeAdView
+               nativeAdAdapterDelegate:(id<MANativeAdAdapterDelegate>)nativeAdAdapterDelegate
+                          builderBlock:(NS_NOESCAPE MANativeAdBuilderBlock)builderBlock {
+    
+    if (self = [super initWithFormat:MAAdFormat.native builderBlock:builderBlock]) {
+        self.nativeAdAssets = nativeAdAssets;
+        self.sasNativeAdView = nativeAdView;
+        self.nativeAdAdapterDelegate = nativeAdAdapterDelegate;
+    }
+    
+    return self;
+}
+
+- (BOOL)prepareForInteractionClickableViews:(NSArray<UIView *> *)clickableViews withContainer:(UIView *)container {
+    // Tracking the third party mediation view to handle impression, viewability & clicks
+    [self.sasNativeAdView trackMediationView:container];
+    
+    // Disabling interactions on all views except the container view: we don't want subviews to steal the click events
+    // as only the container is tracked!
+    for (UIView *view in clickableViews) {
+        if (view != container) {
+            view.userInteractionEnabled = NO;
+        }
+    }
+    
+    // Calling the AppLovin delegate to notify it that the view is ready for interaction
+    if (self.nativeAdAdapterDelegate != nil && [self.nativeAdAdapterDelegate respondsToSelector:@selector(didDisplayNativeAdWithExtraInfo:)]) {
+        [self.nativeAdAdapterDelegate didDisplayNativeAdWithExtraInfo:nil];
+    }
+    
+    return YES;
 }
 
 @end

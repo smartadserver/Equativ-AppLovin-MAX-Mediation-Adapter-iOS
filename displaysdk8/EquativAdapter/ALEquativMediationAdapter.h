@@ -14,7 +14,7 @@ NS_ASSUME_NONNULL_BEGIN
  * If you are using an older version of the SDK (formerly Smart Display SDK), with a 7.x version, please check the adapter dedicated to this version here:
  * https://github.com/smartadserver/Equativ-AppLovin-MAX-Mediation-Adapter-iOS/displaysdk7
  */
-@interface ALEquativMediationAdapter : ALMediationAdapter<MAAdViewAdapter, MAInterstitialAdapter>
+@interface ALEquativMediationAdapter : ALMediationAdapter<MAAdViewAdapter, MAInterstitialAdapter, MANativeAdAdapter>
 
 @end
 

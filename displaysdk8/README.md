@@ -3,7 +3,7 @@ Equativ - AppLovin MAX SDK Adapter
 
 Introduction
 ------------
-The _Equativ Display SDK v8.x_ can be used through _AppLovin MAX_ using the adapter provided in this repository for banner and interstitial. This adapter is compatible with:
+The _Equativ Display SDK v8.x_ can be used through _AppLovin MAX_ using the adapter provided in this repository for banner, interstitial and native ads. This adapter is compatible with:
 * _Smart Display SDK_ v8.0+
 * _AppLovin MAX SDK_ v11.9.0
 
