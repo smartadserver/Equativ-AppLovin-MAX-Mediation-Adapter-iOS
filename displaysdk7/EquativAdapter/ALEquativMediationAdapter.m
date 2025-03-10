@@ -337,16 +337,6 @@ NS_ASSUME_NONNULL_BEGIN
     }
 }
 
-- (void)rewardedVideoManager:(SASRewardedVideoManager *)manager didSendVideoEvent:(SASVideoEvent)videoEvent {
-    if (self.maxRewardedAdapterDelegate != nil) {
-        if (videoEvent == SASVideoEventStart && [self.maxRewardedAdapterDelegate respondsToSelector:@selector(didStartRewardedAdVideo)]) {
-            [self.maxRewardedAdapterDelegate didStartRewardedAdVideo];
-        } else if (videoEvent == SASVideoEventComplete && [self.maxRewardedAdapterDelegate respondsToSelector:@selector(didCompleteRewardedAdVideo)]) {
-            [self.maxRewardedAdapterDelegate didCompleteRewardedAdVideo];
-        }
-    }
-}
-
 - (void)rewardedVideoManager:(SASRewardedVideoManager *)manager didCollectReward:(SASReward *)reward {
     if (self.maxRewardedAdapterDelegate != nil && [self.maxRewardedAdapterDelegate respondsToSelector:@selector(didRewardUserWithReward:)]) {
         MAReward *maxReward = [MAReward rewardWithAmount:reward.amount.integerValue label:reward.currency];
